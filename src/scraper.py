@@ -2,11 +2,11 @@
 scraper.py
 
 Fetches the most recent Walmart job postings from careers.walmart.com
-using their GraphQL API. Returns top 5 most recent jobs per category:
-  - Data Scientist (senior / staff / principal)
-  - Data Analyst
-  - Software Engineer
-  - Product Manager
+using their GraphQL API. Returns 2-3 most recent validated jobs per category:
+  - Data Science (senior / staff / principal data scientist)
+  - Data Analytics (senior / staff / principal data analyst)
+  - Software Engineering (senior / staff / principal software engineer)
+  - Product Management (senior / staff / principal product manager)
 
 Each job URL is validated before inclusion -- jobs whose listing page
 returns a 404 / job-not-found are automatically filtered out.
@@ -54,35 +54,58 @@ query JobSearch($req: JobSearchRequest!) {
 
 SEARCH_CATEGORIES = [
     {
-        "label": "Data Scientist",
-        "query": "senior staff principal data scientist",
+        "label": "Data Science",
+        "queries": [
+            "principal data scientist",
+            "staff data scientist",
+            "senior data scientist",
+            "data scientist",
+        ],
         "title_keywords": ["data scientist"],
     },
     {
-        "label": "Data Analyst",
-        "query": "senior data analyst",
-        "title_keywords": ["data analyst", "analytics analyst"],
+        "label": "Data Analytics",
+        "queries": [
+            "principal data analyst",
+            "staff data analyst",
+            "senior data analyst",
+            "data analyst",
+            "analytics analyst",
+        ],
+        "title_keywords": ["data analyst", "analytics analyst", "data analytics"],
     },
     {
-        "label": "Software Engineer",
-        "query": "senior staff principal software engineer",
+        "label": "Software Engineering",
+        "queries": [
+            "principal software engineer",
+            "staff software engineer",
+            "senior software engineer",
+            "software engineer",
+        ],
         "title_keywords": ["software engineer", "software developer"],
     },
     {
-        "label": "Product Manager",
-        "query": "senior staff principal product manager",
+        "label": "Product Management",
+        "queries": [
+            "principal product manager",
+            "staff product manager",
+            "senior product manager",
+            "product manager",
+            "product management",
+        ],
         "title_keywords": ["product manager", "product management"],
     },
 ]
 
-RESULTS_PER_CATEGORY = 5
+RESULTS_PER_CATEGORY = 3
+MIN_RESULTS_PER_CATEGORY = 2
 
 
 def validate_url(url):
     """
     Returns True if the job listing URL resolves to a valid, live page.
-    Walmart redirects expired/invalid job IDs to /job-not-found, so we
-    follow redirects and check the final URL path.
+    Walmart redirects expired/invalid job IDs to /job-not-found,
+    so we follow redirects and check the final URL path.
     """
     try:
         resp = requests.get(
@@ -107,7 +130,7 @@ def validate_url(url):
         return False
 
 
-def fetch_jobs(search_query, size=50):
+def fetch_jobs(search_query, size=100):
     payload = {
         "query": JOB_SEARCH_GQL,
         "variables": {
@@ -166,7 +189,6 @@ def normalize_job(raw, category_label):
 
     location_parts = [p for p in [city.title(), state.upper()] if p]
     location = ", ".join(location_parts) if location_parts else (country or "Unknown")
-
     url = BASE_JOB_URL + job_id if job_id else "https://careers.walmart.com/"
 
     return {
@@ -180,23 +202,34 @@ def normalize_job(raw, category_label):
     }
 
 
-def scrape_top_jobs():
-    all_results = []
-    seen_ids = set()
+def scrape_category(cat, seen_ids):
+    """
+    Tries multiple search queries for a category until we have enough
+    validated, unique results. Returns up to RESULTS_PER_CATEGORY jobs.
+    """
+    label = cat["label"]
+    collected = []
+    collected_ids = set()
 
-    for cat in SEARCH_CATEGORIES:
-        label = cat["label"]
-        logger.info("Fetching category: %s", label)
-        raw_jobs = fetch_jobs(cat["query"], size=50)
-        logger.info("  Raw results: %d", len(raw_jobs))
+    for query in cat["queries"]:
+        if len(collected) >= RESULTS_PER_CATEGORY:
+            break
 
-        filtered = []
+        logger.info("  [%s] Trying query: '%s'", label, query)
+        raw_jobs = fetch_jobs(query, size=100)
+        logger.info("    Raw results: %d", len(raw_jobs))
+
         for raw in raw_jobs:
+            if len(collected) >= RESULTS_PER_CATEGORY:
+                break
+
             job_id = raw.get("jobId", "")
-            if not job_id or job_id in seen_ids:
+            if not job_id or job_id in seen_ids or job_id in collected_ids:
                 continue
+
             title = raw.get("jobTitle") or ""
             country = raw.get("country") or ""
+
             if country and country.upper() != "US":
                 continue
             if not is_title_match(title, cat["title_keywords"]):
@@ -206,21 +239,43 @@ def scrape_top_jobs():
 
             job = normalize_job(raw, label)
 
-            logger.info("  Validating URL for: %s (%s)", title, job["url"])
+            logger.info("    Validating: %s (%s)", title, job["url"])
             if not validate_url(job["url"]):
-                logger.warning("  INVALID (404/not-found) -- skipping: %s", job["url"])
+                logger.warning("    INVALID (404/not-found) -- skipping: %s", job["url"])
                 continue
 
-            filtered.append(job)
-            seen_ids.add(job_id)
+            collected.append(job)
+            collected_ids.add(job_id)
+            logger.info("    VALID -- added (%d/%d)", len(collected), RESULTS_PER_CATEGORY)
 
-        filtered.sort(
-            key=lambda j: j["posted_date"] if j["posted_date"] else datetime.min,
-            reverse=True,
-        )
-        top5 = filtered[:RESULTS_PER_CATEGORY]
-        logger.info("  Kept %d valid, taking top %d", len(filtered), len(top5))
-        all_results.extend(top5)
+    collected.sort(
+        key=lambda j: j["posted_date"] if j["posted_date"] else datetime.min,
+        reverse=True,
+    )
+
+    logger.info("  [%s] Final count: %d", label, len(collected))
+    return collected
+
+
+def scrape_top_jobs():
+    all_results = []
+    seen_ids = set()
+
+    for cat in SEARCH_CATEGORIES:
+        label = cat["label"]
+        logger.info("Fetching category: %s", label)
+        jobs = scrape_category(cat, seen_ids)
+
+        if len(jobs) < MIN_RESULTS_PER_CATEGORY:
+            logger.warning(
+                "Category '%s' only yielded %d jobs (minimum is %d).",
+                label, len(jobs), MIN_RESULTS_PER_CATEGORY
+            )
+
+        for j in jobs:
+            seen_ids.add(j["id"])
+
+        all_results.extend(jobs)
 
     logger.info("Total jobs collected: %d", len(all_results))
     return all_results
