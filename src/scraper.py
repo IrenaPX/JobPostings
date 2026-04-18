@@ -1,160 +1,199 @@
 """
 scraper.py
-Fetches job postings from Walmart Careers API for target job families
-posted in the current week (Monday through Friday).
+
+Fetches the most recent Walmart job postings from careers.walmart.com
+using their GraphQL API. Returns top 5 most recent jobs per category:
+  - Data Scientist (senior / staff / principal)
+  - Data Analyst
+  - Software Engineer
+  - Product Manager
 """
+
 import requests
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-WALMART_API_URL = "https://careers.walmart.com/api/jobs"
+GRAPHQL_ENDPOINT = "https://careers.walmart.com/api/talent/job"
+BASE_JOB_URL = "https://careers.walmart.com/us/en/jobs/"
 
-TARGET_KEYWORDS = [
-    "data science",
-    "data scientist",
-    "data analytics",
-    "data analyst",
-    "analytics",
-    "machine learning",
-    "software engineer",
-    "software engineering",
-    "product manager",
-    "product management",
-]
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Referer": "https://careers.walmart.com/",
+    "Origin": "https://careers.walmart.com",
+}
 
-TARGET_CATEGORIES = [
-    "Data Science & Analytics",
-    "Software Engineering & Technology",
-    "Product Management",
-    "Information Technology",
-    "Business Analytics",
-]
-
-
-def get_week_date_range():
-    """Returns Monday and Friday of the current week as datetime objects."""
-    today = datetime.now()
-    monday = today - timedelta(days=today.weekday())
-    friday = monday + timedelta(days=4)
-    return monday.replace(hour=0, minute=0, second=0), friday.replace(hour=23, minute=59, second=59)
-
-
-def fetch_jobs_from_api(keyword, start=0, count=100):
-    """Calls Walmart careers search API. Returns raw JSON or empty dict on failure."""
-    params = {
-        "q": keyword,
-        "start": start,
-        "count": count,
-        "sort": "date",
+JOB_SEARCH_GQL = """
+query JobSearch($req: JobSearchRequest!) {
+  jobSearch(jobSearchRequest: $req) {
+    totalResults
+    searchResults {
+      jobId
+      jobTitle
+      city
+      state
+      country
+      jobPostingDate
+      area
+      category
     }
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-        "Referer": "https://careers.walmart.com/",
+  }
+}
+"""
+
+SEARCH_CATEGORIES = [
+    {
+        "label": "Data Scientist",
+        "query": "senior staff principal data scientist",
+        "title_keywords": ["data scientist"],
+    },
+    {
+        "label": "Data Analyst",
+        "query": "senior data analyst",
+        "title_keywords": ["data analyst", "analytics analyst"],
+    },
+    {
+        "label": "Software Engineer",
+        "query": "senior staff principal software engineer",
+        "title_keywords": ["software engineer", "software developer"],
+    },
+    {
+        "label": "Product Manager",
+        "query": "senior staff principal product manager",
+        "title_keywords": ["product manager", "product management"],
+    },
+]
+
+RESULTS_PER_CATEGORY = 5
+
+
+def fetch_jobs(search_query, size=50):
+    payload = {
+        "query": JOB_SEARCH_GQL,
+        "variables": {
+            "req": {
+                "searchString": search_query,
+                "from": 0,
+                "size": size,
+                "isTitleSearch": False,
+            }
+        },
     }
     try:
-        response = requests.get(WALMART_API_URL, params=params, headers=headers, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        resp = requests.post(GRAPHQL_ENDPOINT, json=payload, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        if "errors" in data:
+            logger.warning("GraphQL errors for '%s': %s", search_query, data["errors"])
+            return []
+        search_data = data.get("data", {}).get("jobSearch", {})
+        return search_data.get("searchResults", [])
     except requests.exceptions.RequestException as e:
-        logger.warning("API request failed for keyword '%s': %s" % (keyword, e))
-        return {}
+        logger.warning("API request failed for '%s': %s", search_query, e)
+        return []
+    except (ValueError, KeyError) as e:
+        logger.warning("Failed to parse response for '%s': %s", search_query, e)
+        return []
 
 
 def parse_posting_date(date_str):
-    """Parses Walmart date format. Returns None if unparseable."""
     if not date_str:
         return None
-    formats = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"]
-    for fmt in formats:
-        try:
-            return datetime.strptime(date_str[:19], fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def normalize_job(raw):
-    """Normalizes a raw API job dict. Returns None if missing key fields."""
-    job_id = raw.get("jobId") or raw.get("id") or raw.get("requisitionId")
-    title = raw.get("title") or raw.get("jobTitle") or raw.get("positionTitle")
-    if not job_id or not title:
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
         return None
-    posted_str = (
-        raw.get("postedDate")
-        or raw.get("postingDate")
-        or raw.get("datePosted")
-        or raw.get("createdDate")
-    )
-    posted_date = parse_posting_date(posted_str)
-    location = raw.get("locationName") or raw.get("location") or raw.get("primaryLocation") or "Unknown"
-    department = raw.get("department") or raw.get("jobFamily") or raw.get("category") or ""
-    url = (
-        raw.get("url")
-        or raw.get("jobUrl")
-        or "https://careers.walmart.com/us/jobs/" + str(job_id)
-    )
+
+
+def is_title_match(job_title, keywords):
+    title_lower = job_title.lower()
+    return any(kw in title_lower for kw in keywords)
+
+
+def is_target_seniority(job_title):
+    title_lower = job_title.lower()
+    senior_terms = ["senior", "sr.", "sr,", "staff", "principal", "lead", "distinguished"]
+    return any(term in title_lower for term in senior_terms)
+
+
+def normalize_job(raw, category_label):
+    job_id = raw.get("jobId") or ""
+    title = raw.get("jobTitle") or ""
+    city = raw.get("city") or ""
+    state = raw.get("state") or ""
+    country = raw.get("country") or ""
+    posting_date = parse_posting_date(raw.get("jobPostingDate"))
+
+    location_parts = [p for p in [city.title(), state.upper()] if p]
+    location = ", ".join(location_parts) if location_parts else (country or "Unknown")
+    url = BASE_JOB_URL + job_id if job_id else "https://careers.walmart.com/"
+
     return {
-        "id": str(job_id),
+        "id": job_id,
         "title": title,
         "location": location,
-        "department": department,
-        "posted_date": posted_date,
+        "country": country,
+        "department": category_label,
+        "posted_date": posting_date,
         "url": url,
     }
 
 
-def is_target_role(job):
-    """Returns True if title or department matches target domains."""
-    text = (job["title"] + " " + job["department"]).lower()
-    target_terms = [
-        "data science", "data scientist", "data analyst", "analytics", "analyst",
-        "machine learning", "ml engineer", "software engineer", "software development",
-        "product manager", "product management", "data engineer", "ai ", "artificial intelligence",
-    ]
-    return any(term in text for term in target_terms)
-
-
-def scrape_this_week():
-    """Main entry point. Returns deduplicated list of target jobs posted this week."""
-    monday, friday = get_week_date_range()
-    logger.info("Scraping jobs posted between %s and %s" % (monday.date(), friday.date()))
+def scrape_top_jobs():
+    all_results = []
     seen_ids = set()
-    results = []
-    for keyword in TARGET_KEYWORDS:
-        logger.info("Fetching keyword: '%s'" % keyword)
-        raw_response = fetch_jobs_from_api(keyword)
-        jobs_raw = (
-            raw_response.get("jobs")
-            or raw_response.get("results")
-            or raw_response.get("jobPostings")
-            or []
+
+    for cat in SEARCH_CATEGORIES:
+        label = cat["label"]
+        logger.info("Fetching category: %s", label)
+
+        raw_jobs = fetch_jobs(cat["query"], size=50)
+        logger.info("  Raw results: %d", len(raw_jobs))
+
+        filtered = []
+        for raw in raw_jobs:
+            job_id = raw.get("jobId", "")
+            if not job_id or job_id in seen_ids:
+                continue
+            title = raw.get("jobTitle") or ""
+            country = raw.get("country") or ""
+
+            if country and country.upper() != "US":
+                continue
+            if not is_title_match(title, cat["title_keywords"]):
+                continue
+            if not is_target_seniority(title):
+                continue
+
+            job = normalize_job(raw, label)
+            filtered.append(job)
+            seen_ids.add(job_id)
+
+        filtered.sort(
+            key=lambda j: j["posted_date"] if j["posted_date"] else datetime.min,
+            reverse=True,
         )
-        for raw_job in jobs_raw:
-            job = normalize_job(raw_job)
-            if not job:
-                continue
-            if job["id"] in seen_ids:
-                continue
-            if not is_target_role(job):
-                continue
-            if job["posted_date"]:
-                if not (monday <= job["posted_date"] <= friday):
-                    continue
-            seen_ids.add(job["id"])
-            results.append(job)
-    logger.info("Found %d qualifying jobs this week." % len(results))
-    return results
+
+        top5 = filtered[:RESULTS_PER_CATEGORY]
+        logger.info("  Kept %d, taking top %d", len(filtered), len(top5))
+        all_results.extend(top5)
+
+    logger.info("Total jobs collected: %d", len(all_results))
+    return all_results
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    jobs = scrape_this_week()
+    jobs = scrape_top_jobs()
     for j in jobs:
-        print("[%s] %s - %s | %s" % (j["posted_date"], j["title"], j["location"], j["url"]))
+        date_str = j["posted_date"].strftime("%Y-%m-%d") if j["posted_date"] else "Unknown"
+        print("[%s] [%s] %s - %s | %s" % (
+            date_str, j["department"], j["title"], j["location"], j["url"]
+        ))
