@@ -268,9 +268,10 @@ def scrape_top_jobs():
 
         if len(jobs) < MIN_RESULTS_PER_CATEGORY:
             logger.warning(
-                "Category '%s' only yielded %d jobs (minimum is %d).",
+                "Category '%s' only yielded %d jobs (minimum is %d) -- skipping.",
                 label, len(jobs), MIN_RESULTS_PER_CATEGORY
             )
+            continue
 
         for j in jobs:
             seen_ids.add(j["id"])
