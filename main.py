@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import anthropic
-from src.scraper import scrape_this_week
+from src.scraper import scrape_top_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -14,11 +14,14 @@ def draft_post_with_claude(jobs):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     job_lines = []
     for j in jobs[:20]:
-        date_str = j["posted_date"].strftime("%b %d") if j["posted_date"] else "this week"
-        job_lines.append("- " + j["title"] + " | " + j["location"] + " | " + date_str)
-    jobs_block = "\n".join(job_lines) if job_lines else "No new jobs this week."
+        date_str = j["posted_date"].strftime("%b %d") if j["posted_date"] else "recent"
+        job_lines.append(
+            "- [" + j["department"] + "] " + j["title"] + " | " + j["location"] + " | " + date_str
+        )
+    jobs_block = "\n".join(job_lines) if job_lines else "No jobs found."
+
     prompt = (
-        "Write a LinkedIn post (max 1300 chars) about these Walmart tech jobs:\n\n"
+        "Write a LinkedIn post (max 1300 chars) about these recently posted Walmart tech jobs:\n\n"
         + jobs_block
         + "\n\nRules: short hook opener, list up to 8 roles (title+city), CTA to careers.walmart.com."
         + "\nReturn ONLY the post text."
@@ -50,26 +53,35 @@ def send_email(subject, body):
 
 
 def main():
-    logger.info("Scraping Walmart Careers...")
-    jobs = scrape_this_week()
+    logger.info("Scraping Walmart Careers (top 5 per category)...")
+    jobs = scrape_top_jobs()
     logger.info("Found " + str(len(jobs)) + " jobs.")
+
     if not jobs:
-        send_email("Walmart Jobs Bot - No new postings", "No new tech jobs this week.")
+        send_email(
+            "Walmart Jobs Bot - No results",
+            "No matching tech jobs were returned by the scraper."
+        )
         return
+
     logger.info("Drafting post with Claude...")
     post_text = draft_post_with_claude(jobs)
     logger.info("Post drafted: " + str(len(post_text)) + " chars")
+
     job_lines = []
     for j in jobs:
         date_str = j["posted_date"].strftime("%Y-%m-%d") if j["posted_date"] else "unknown"
-        job_lines.append("- " + j["title"] + " | " + j["location"] + " | " + date_str)
+        job_lines.append(
+            "[" + j["department"] + "] " + j["title"] + " | " + j["location"] + " | " + date_str
+        )
         job_lines.append("  " + j["url"])
     job_list = "\n".join(job_lines)
+
     subject = "Walmart Bot - Draft ready (" + str(len(jobs)) + " jobs)"
     body = (
         "DRAFT POST:\n\n"
         + post_text
-        + "\n\nJobs scraped this week:\n"
+        + "\n\n---\nJobs pulled (top 5 most recent per category):\n"
         + job_list
         + "\n\nhttps://careers.walmart.com"
     )
