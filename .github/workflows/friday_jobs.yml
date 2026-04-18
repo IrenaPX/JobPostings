@@ -1,4 +1,4 @@
-hname: Walmart Jobs Bot -- Weekly Email Draft
+name: Walmart Jobs Bot -- Weekly Email Draft
 
 on:
   schedule:
