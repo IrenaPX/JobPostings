@@ -1,8 +1,8 @@
-name: Walmart Jobs Bot -- Weekly Email Draft
+hname: Walmart Jobs Bot -- Weekly Email Draft
 
 on:
   schedule:
-    - cron: "0 14 * * 6"
+    - cron: "0 13 * * 6"
   workflow_dispatch:
 
 jobs:
