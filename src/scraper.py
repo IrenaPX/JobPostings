@@ -22,6 +22,11 @@ QUERY_ID = "b0467c1f-f578-4261-9280-0ea4614f251c"
 BASE_JOB_URL = "https://careers.walmart.com/us/en/jobs/"
 JOB_NOT_FOUND_PATH = "/job-not-found"
 
+# Number of result pages to pull per search query (each page ~10 jobs).
+# Pulling more pages gives the filters a larger candidate pool so that
+# categories like Data Science are not starved by the top-10 results.
+PAGES_PER_QUERY = 5
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -112,10 +117,10 @@ def validate_url(url):
         return False
 
 
-def fetch_jobs(search_query, size=100):
+def fetch_jobs(search_query, page=0):
     """
     Calls the /api/graphql persisted-query endpoint and returns a flat list
-    of raw job dicts from the artifact payload.
+    of raw job dicts from the artifact payload for a single result page.
 
     The site uses a chat/AI wrapper (jobSearchAssistant). We send a
     single-turn message and read back the first tool_message artifact.
@@ -147,7 +152,7 @@ def fetch_jobs(search_query, size=100):
                         "management_levels": [],
                         "content_page": 0,
                         "future_roles_page": 0,
-                        "job_page": 0,
+                        "job_page": page,
                     }
                 },
             }
@@ -176,8 +181,9 @@ def fetch_jobs(search_query, size=100):
         artifact = tool_messages[0].get("artifact", {})
         jobs = artifact.get("jobs", [])
         logger.info(
-            " '%s' -> %d total, %d returned",
+            " '%s' (page %d) -> %d total, %d returned",
             search_query,
+            page,
             artifact.get("total_jobs", 0),
             len(jobs),
         )
@@ -189,6 +195,27 @@ def fetch_jobs(search_query, size=100):
     except (ValueError, KeyError) as e:
         logger.warning("Failed to parse response for '%s': %s", search_query, e)
         return []
+
+
+def fetch_jobs_pages(search_query, pages=PAGES_PER_QUERY):
+    """
+    Pulls multiple result pages for a query and returns a combined,
+    de-duplicated list of raw job dicts. Stops early if a page is empty.
+    """
+    combined = []
+    seen = set()
+    for page in range(pages):
+        page_jobs = fetch_jobs(search_query, page=page)
+        if not page_jobs:
+            break
+        for raw in page_jobs:
+            jid = raw.get("job_id", "")
+            if jid and jid in seen:
+                continue
+            if jid:
+                seen.add(jid)
+            combined.append(raw)
+    return combined
 
 
 def parse_posting_date(date_str):
@@ -213,7 +240,22 @@ def is_title_match(job_title, keywords):
 
 def is_target_seniority(job_title):
     title_lower = job_title.lower()
-    senior_terms = ["senior", "sr.", "sr,", "staff", "principal"]
+    senior_terms = [
+        "senior",
+        "sr.",
+        "sr,",
+        "sr ",
+        "staff",
+        "principal",
+        "lead",
+        "distinguished",
+        "manager",
+        "director",
+        " iii",
+        " iv",
+        " v",
+        " ii",
+    ]
     return any(term in title_lower for term in senior_terms)
 
 
@@ -265,7 +307,7 @@ def scrape_category(cat, seen_ids):
             break
 
         logger.info(" [%s] Trying query: '%s'", label, query)
-        raw_jobs = fetch_jobs(query)
+        raw_jobs = fetch_jobs_pages(query)
 
         if not raw_jobs:
             logger.info(" [%s] No results for '%s'", label, query)
