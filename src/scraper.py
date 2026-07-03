@@ -25,7 +25,7 @@ JOB_NOT_FOUND_PATH = "/job-not-found"
 # Number of result pages to pull per search query (each page ~10 jobs).
 # Pulling more pages gives the filters a larger candidate pool so that
 # categories like Data Science are not starved by the top-10 results.
-PAGES_PER_QUERY = 5
+PAGES_PER_QUERY = 3
 
 HEADERS = {
     "User-Agent": (
@@ -323,6 +323,9 @@ def scrape_category(cat, seen_ids):
 
             title = raw.get("jobPostingTitle") or raw.get("title") or ""
             country = raw.get("country") or ""
+
+            # DEBUG: log every candidate title/country to understand filtering
+            logger.info(" [DEBUG %s] candidate: title=%r country=%r", label, title, country)
 
             if country and country.upper() != "US":
                 continue
