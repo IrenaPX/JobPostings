@@ -110,9 +110,9 @@ def validate_url(url):
                 )
                 if resp.status_code == 404:
                               return False
-                          if JOB_NOT_FOUND_PATH in resp.url:
-                                        return False
-                                    return True
+                if JOB_NOT_FOUND_PATH in resp.url:
+                              return False
+                return True
 except requests.exceptions.RequestException as e:
         logger.warning("URL validation request failed for %s: %s", url, e)
         return False
