@@ -144,10 +144,8 @@ def fetch_jobs(search_query, page=0):
                 "channel": "job_search",
                 "context": {
                     "job_search_context": {
-                        "refined_query": f"jobPostingTitle == '{search_query}'",
-                        "direct_search": True,
                         "locale": "en_US",
-                        "sort": "newest",
+                        "sort": "relevance",
                         "active_tab": "jobs",
                         "management_levels": [],
                         "content_page": 0,
@@ -324,8 +322,6 @@ def scrape_category(cat, seen_ids):
             title = raw.get("jobPostingTitle") or raw.get("title") or ""
             country = raw.get("country") or ""
 
-            # DEBUG: log every candidate title/country to understand filtering
-            logger.info(" [DEBUG %s] candidate: title=%r country=%r", label, title, country)
 
             if country and country.upper() != "US":
                 continue
