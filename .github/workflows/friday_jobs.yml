@@ -2,8 +2,14 @@ name: Walmart Jobs Bot -- Weekly Email Draft
 
 on:
   schedule:
-    - cron: "0 3 * * 5"
+    # Friday 7:00am Central (13:00 UTC; 8:00am during daylight time)
+    - cron: "0 13 * * 5"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List jobs in the run summary without emailing"
+        type: boolean
+        default: false
 
 jobs:
   post-jobs:
@@ -30,12 +36,15 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          REGION: "US"
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: python main.py
 
   # Prevents GitHub from auto-disabling this scheduled workflow after
   # 60 days without repo activity. Uses the API (no commits).
   keepalive:
     name: Keepalive
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       actions: write

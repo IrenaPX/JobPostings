@@ -10,6 +10,7 @@ Each job URL is validated before inclusion -- jobs whose listing page
 returns a 404 / job-not-found are automatically filtered out.
 """
 
+import os
 import requests
 import logging
 from datetime import datetime
@@ -86,6 +87,29 @@ SEARCH_CATEGORIES = [
 
 RESULTS_PER_CATEGORY = 3
 MIN_RESULTS_PER_CATEGORY = 2
+
+# Region is set per workflow: "US" (default) or "IN" (India / IDC).
+REGION = os.environ.get("REGION", "US").upper()
+REGIONS = {
+    "US": {"countries": {"US", "USA", "UNITED STATES"}, "query_suffix": ""},
+    "IN": {"countries": {"IN", "IND", "INDIA"}, "query_suffix": " india"},
+}
+INDIA_CITIES = {"bengaluru", "bangalore", "chennai", "gurugram", "gurgaon", "hyderabad", "pune"}
+
+# Countries seen during a run, logged when a region comes back empty.
+SEEN_COUNTRIES = {}
+
+
+def in_region(raw):
+    country = (raw.get("country") or "").strip().upper()
+    SEEN_COUNTRIES[country] = SEEN_COUNTRIES.get(country, 0) + 1
+    if country:
+        return country in REGIONS[REGION]["countries"]
+    # No country on the record: fall back to the city for India.
+    city = (raw.get("city") or "").strip().lower()
+    if REGION == "IN":
+        return city in INDIA_CITIES
+    return True
 
 
 def validate_url(url):
@@ -276,7 +300,10 @@ def normalize_job(raw, category_label):
     country = raw.get("country") or ""
     posting_date = parse_posting_date(raw.get("jobPostingStartDate"))
 
-    location_parts = [p for p in [city.title(), state.upper()] if p]
+    if REGION == "IN":
+        location_parts = [p for p in [city.title(), "India"] if p]
+    else:
+        location_parts = [p for p in [city.title(), state.upper()] if p]
     location = ", ".join(location_parts) if location_parts else (country or "Unknown")
     url = BASE_JOB_URL + job_id if job_id else "https://careers.walmart.com/"
 
@@ -304,6 +331,7 @@ def scrape_category(cat, seen_ids):
         if len(collected) >= RESULTS_PER_CATEGORY:
             break
 
+        query = query + REGIONS[REGION]["query_suffix"]
         logger.info(" [%s] Trying query: '%s'", label, query)
         raw_jobs = fetch_jobs_pages(query)
 
@@ -320,10 +348,7 @@ def scrape_category(cat, seen_ids):
                 continue
 
             title = raw.get("jobPostingTitle") or raw.get("title") or ""
-            country = raw.get("country") or ""
-
-
-            if country and country.upper() != "US":
+            if not in_region(raw):
                 continue
             if not is_title_match(title, cat["title_keywords"]):
                 continue
@@ -371,6 +396,7 @@ def scrape_top_jobs():
 
         all_results.extend(jobs)
 
+    logger.info("Region %s: %d jobs. Countries seen: %s", REGION, len(all_results), SEEN_COUNTRIES)
     return all_results
 
 

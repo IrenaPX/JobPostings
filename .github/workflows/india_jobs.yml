@@ -1,0 +1,55 @@
+name: Walmart Jobs Bot India (IDC) -- Weekly Email Draft
+
+on:
+  schedule:
+    # Thursday 10:00pm Central (Fri 04:00 UTC; 11:00pm during daylight time)
+    - cron: "0 4 * * 5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List jobs in the run summary without emailing"
+        type: boolean
+        default: false
+
+jobs:
+  post-jobs:
+    name: Scrape, Draft, and Email
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Walmart Jobs Bot
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          REGION: "IN"
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: python main.py
+
+  # Prevents GitHub from auto-disabling this scheduled workflow after
+  # 60 days without repo activity. Uses the API (no commits).
+  keepalive:
+    name: Keepalive
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-enable this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable "${{ github.workflow }}" -R "${{ github.repository }}"
