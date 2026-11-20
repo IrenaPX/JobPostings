@@ -59,8 +59,9 @@ SEARCH_CATEGORIES = [
             "senior data analyst",
             "data analyst",
             "analytics analyst",
+            "data analytics",
         ],
-        "title_keywords": ["data analyst", "analytics analyst", "data analytics"],
+        "title_keywords": ["data analyst", "analytics analyst", "data analytics", "analyst, data", "analytics"],
     },
     {
         "label": "Software Engineering",
@@ -395,8 +396,12 @@ def scrape_category(cat, seen_ids):
     collected = []
     collected_ids = set()
 
+    # US keeps the first valid hits (each needs a slow link check).
+    # India gathers every match, then keeps the most recently posted.
+    take_all = REGION == "IN"
+
     for query in cat["queries"]:
-        if len(collected) >= RESULTS_PER_CATEGORY:
+        if len(collected) >= RESULTS_PER_CATEGORY and not take_all:
             break
 
         query = query + REGIONS[REGION]["query_suffix"]
@@ -408,7 +413,7 @@ def scrape_category(cat, seen_ids):
             continue
 
         for raw in raw_jobs:
-            if len(collected) >= RESULTS_PER_CATEGORY:
+            if len(collected) >= RESULTS_PER_CATEGORY and not take_all:
                 break
 
             job_id = raw.get("job_id", "")
@@ -440,6 +445,7 @@ def scrape_category(cat, seen_ids):
         key=lambda j: j["posted_date"] if j["posted_date"] else datetime.min,
         reverse=True,
     )
+    collected = collected[:RESULTS_PER_CATEGORY]
 
     logger.info(" [%s] Final count: %d", label, len(collected))
     return collected
