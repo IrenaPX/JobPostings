@@ -96,6 +96,14 @@ REGIONS = {
     "US": {"countries": {"US", "USA", "UNITED STATES"}, "query_suffix": ""},
     "IN": {"countries": {"IN", "IND", "INDIA"}, "query_suffix": ""},
 }
+# Workday rate-limits heavily, so India uses one broad search per category
+# (about 12 requests total) instead of the US multi-query approach.
+IN_QUERIES = {
+    "Data Science": ["data scientist"],
+    "Data Analytics": ["data analyst"],
+    "Software Engineering": ["software engineer"],
+    "Product Management": ["product manager"],
+}
 INDIA_CITIES = {"bengaluru", "bangalore", "chennai", "gurugram", "gurgaon", "hyderabad", "pune"}
 
 # Countries seen during a run, logged when a region comes back empty.
@@ -411,7 +419,8 @@ def scrape_category(cat, seen_ids):
     # India gathers every match, then keeps the most recently posted.
     take_all = REGION == "IN"
 
-    for query in cat["queries"]:
+    queries = IN_QUERIES.get(label, cat["queries"]) if REGION == "IN" else cat["queries"]
+    for query in queries:
         if len(collected) >= RESULTS_PER_CATEGORY and not take_all:
             break
 
