@@ -100,7 +100,7 @@ REGIONS = {
 # (about 12 requests total) instead of the US multi-query approach.
 IN_QUERIES = {
     "Data Science": ["(IND) data scientist"],
-    "Data Analytics": ["(IND) data analyst"],
+    "Data Analytics": ["(IND) data analyst", "(IND) analytics"],
     "Software Engineering": ["(IND) software engineer"],
     "Product Management": ["(IND) product manager"],
 }
