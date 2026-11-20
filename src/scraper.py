@@ -92,7 +92,7 @@ MIN_RESULTS_PER_CATEGORY = 2
 REGION = os.environ.get("REGION", "US").upper()
 REGIONS = {
     "US": {"countries": {"US", "USA", "UNITED STATES"}, "query_suffix": ""},
-    "IN": {"countries": {"IN", "IND", "INDIA"}, "query_suffix": " india"},
+    "IN": {"countries": {"IN", "IND", "INDIA"}, "query_suffix": ""},
 }
 INDIA_CITIES = {"bengaluru", "bangalore", "chennai", "gurugram", "gurgaon", "hyderabad", "pune"}
 
@@ -219,6 +219,71 @@ def fetch_jobs(search_query, page=0):
         return []
 
 
+WORKDAY_BASE = "https://walmart.wd504.myworkdayjobs.com"
+WORKDAY_API = WORKDAY_BASE + "/wday/cxs/walmart/WalmartExternal/jobs"
+WORKDAY_PAGE_SIZE = 20
+
+
+def days_ago(posted_on):
+    """'Posted Today' -> 0, 'Posted Yesterday' -> 1, 'Posted 8 Days Ago' -> 8, '30+' -> 30."""
+    text = (posted_on or "").lower()
+    if "today" in text:
+        return 0
+    if "yesterday" in text:
+        return 1
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return int(digits) if digits else 99
+
+
+def fetch_workday_jobs(search_query, page=0):
+    """
+    India (IDC) roles are not on careers.walmart.com; they are listed on
+    Walmart's Workday site. Returns raw dicts shaped like the GraphQL ones.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Accept-Language": "en-US",
+        "User-Agent": HEADERS["User-Agent"],
+    }
+    body = {
+        "appliedFacets": {},
+        "limit": WORKDAY_PAGE_SIZE,
+        "offset": page * WORKDAY_PAGE_SIZE,
+        "searchText": search_query,
+    }
+    try:
+        resp = requests.post(WORKDAY_API, json=body, headers=headers, timeout=30)
+        resp.raise_for_status()
+        postings = resp.json().get("jobPostings", [])
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.warning("Workday request failed for '%s': %s", search_query, e)
+        return []
+
+    jobs = []
+    now_ms = datetime.utcnow().timestamp() * 1000
+    for p in postings:
+        path = p.get("externalPath") or ""
+        loc = p.get("locationsText") or ""
+        parts = loc.split()
+        is_india = loc.startswith("IN ") or "(IND)" in (p.get("title") or "")
+        title = (p.get("title") or "").replace("(IND)", "").strip()
+        if title.isupper():
+            title = title.title()
+        job_id = path.rsplit("_", 1)[-1] if "_" in path else path
+        jobs.append({
+            "job_id": job_id,
+            "jobPostingTitle": title,
+            "city": parts[2] if loc.startswith("IN ") and len(parts) > 2 else "",
+            "state": "",
+            "country": "IN" if is_india else (parts[0] if parts else ""),
+            "jobPostingStartDate": now_ms - days_ago(p.get("postedOn")) * 86400000,
+            "url": WORKDAY_BASE + "/WalmartExternal" + path,
+        })
+    logger.info(" Workday '%s' (page %d) -> %d returned", search_query, page, len(jobs))
+    return jobs
+
+
 def fetch_jobs_pages(search_query, pages=PAGES_PER_QUERY):
     """
     Pulls multiple result pages for a query and returns a combined,
@@ -227,7 +292,10 @@ def fetch_jobs_pages(search_query, pages=PAGES_PER_QUERY):
     combined = []
     seen = set()
     for page in range(pages):
-        page_jobs = fetch_jobs(search_query, page=page)
+        if REGION == "IN":
+            page_jobs = fetch_workday_jobs(search_query, page=page)
+        else:
+            page_jobs = fetch_jobs(search_query, page=page)
         if not page_jobs:
             break
         for raw in page_jobs:
@@ -305,7 +373,7 @@ def normalize_job(raw, category_label):
     else:
         location_parts = [p for p in [city.title(), state.upper()] if p]
     location = ", ".join(location_parts) if location_parts else (country or "Unknown")
-    url = BASE_JOB_URL + job_id if job_id else "https://careers.walmart.com/"
+    url = raw.get("url") or (BASE_JOB_URL + job_id if job_id else "https://careers.walmart.com/")
 
     return {
         "id": job_id,
@@ -358,7 +426,9 @@ def scrape_category(cat, seen_ids):
             job = normalize_job(raw, label)
 
             logger.info(" Validating: %s (%s)", title, job["url"])
-            if not validate_url(job["url"]):
+            # Workday listings come straight from the live search, so only
+            # careers.walmart.com links need the 404 check.
+            if REGION != "IN" and not validate_url(job["url"]):
                 logger.warning(" INVALID (404/not-found) -- skipping: %s", job["url"])
                 continue
 
