@@ -99,10 +99,10 @@ REGIONS = {
 # Workday rate-limits heavily, so India uses one broad search per category
 # (about 12 requests total) instead of the US multi-query approach.
 IN_QUERIES = {
-    "Data Science": ["data scientist"],
-    "Data Analytics": ["data analyst"],
-    "Software Engineering": ["software engineer"],
-    "Product Management": ["product manager"],
+    "Data Science": ["(IND) data scientist"],
+    "Data Analytics": ["(IND) data analyst"],
+    "Software Engineering": ["(IND) software engineer"],
+    "Product Management": ["(IND) product manager"],
 }
 INDIA_CITIES = {"bengaluru", "bangalore", "chennai", "gurugram", "gurgaon", "hyderabad", "pune"}
 
