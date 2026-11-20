@@ -1,23 +1,17 @@
-import json, requests, sys
-sys.path.insert(0, ".")
-from src import scraper as s
-from datetime import datetime
-def gql(text, locale):
-    p={"queryId":s.QUERY_ID,"variables":{"chatRequest":{"messages":[{"role":"user","content":[{"type":"text","text":text}]}],
-      "thread_id":"probe"+datetime.utcnow().strftime('%H%M%S%f'),"channel":"job_search","context":{"job_search_context":{
-      "locale":locale,"sort":"relevance","active_tab":"jobs","management_levels":[],"content_page":0,"future_roles_page":0,"job_page":0}}}},"headers":{}}
-    try:
-        d=requests.post(s.GRAPHQL_ENDPOINT,json=p,headers=s.HEADERS,timeout=20).json()
-        tm=d.get("data",{}).get("jobSearchAssistant",{}).get("tool_messages",[])
-        js=tm[0].get("artifact",{}).get("jobs",[]) if tm else []
-        print("::notice::GQL",locale,repr(text),"->",[(j.get("country"),j.get("city"),j.get("jobPostingTitle"),j.get("job_id")) for j in js[:4]], "err" if "errors" in d else "")
-    except Exception as e: print("::notice::GQL",locale,text,"EXC",str(e)[:150])
-for t in ["(IND) senior data scientist","(IND) SENIOR, DATA SCIENTIST","IND staff software engineer","(IND) senior product manager"]:
-    gql(t,"en_US")
-H={"Content-Type":"application/json","Accept":"application/json","User-Agent":s.HEADERS["User-Agent"],"Origin":"https://walmart.wd5.myworkdayjobs.com","Referer":"https://walmart.wd5.myworkdayjobs.com/WalmartExternal"}
-for site in ["WalmartExternal","walmartexternal"]:
-    W="https://walmart.wd5.myworkdayjobs.com/wday/cxs/walmart/"+site+"/jobs"
-    try:
-        r=requests.post(W,json={"appliedFacets":{},"limit":20,"offset":0,"searchText":"IND data scientist"},headers=H,timeout=20)
-        print("::notice::WD",site,r.status_code,r.text[:300].replace("\n"," "))
-    except Exception as e: print("::notice::WD EXC",str(e)[:200])
+import requests
+H={"Content-Type":"application/json","Accept":"application/json","Accept-Language":"en-US","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"}
+B="https://walmart.wd504.myworkdayjobs.com/wday/cxs/walmart/WalmartExternal/jobs"
+r=requests.post(B,json={"appliedFacets":{},"limit":20,"offset":0,"searchText":"(IND) data scientist"},headers=H,timeout=30)
+d=r.json() if r.ok else {}
+print("::notice::WD",r.status_code,"total",d.get("total"),r.text[:200] if not r.ok else "")
+for j in d.get("jobPostings",[])[:8]:
+    print("::notice::JOB",j.get("title"),"|",j.get("locationsText"),"|",j.get("postedOn"),"|",j.get("externalPath"))
+for f in d.get("facets",[]):
+    fp=f.get("facetParameter")
+    vals=f.get("values",[])
+    nested=[]
+    for v in vals:
+        if "values" in v: nested+= [(v2.get("descriptor"),v2.get("id"),v.get("facetParameter")) for v2 in v["values"]]
+        else: nested.append((v.get("descriptor"),v.get("id"),fp))
+    hits=[x for x in nested if x[0] and ("ndia" in x[0] or "ANGALORE" in x[0].upper() or "Technology" in x[0] or "Data" in x[0] or "Product" in x[0])]
+    print("::notice::FACET",fp,hits[:12])
