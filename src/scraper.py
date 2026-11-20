@@ -11,6 +11,7 @@ returns a 404 / job-not-found are automatically filtered out.
 """
 
 import os
+import time
 import requests
 import logging
 from datetime import datetime
@@ -99,6 +100,7 @@ INDIA_CITIES = {"bengaluru", "bangalore", "chennai", "gurugram", "gurgaon", "hyd
 
 # Countries seen during a run, logged when a region comes back empty.
 SEEN_COUNTRIES = {}
+WORKDAY_FAILURES = []
 
 
 def in_region(raw):
@@ -253,12 +255,21 @@ def fetch_workday_jobs(search_query, page=0):
         "offset": page * WORKDAY_PAGE_SIZE,
         "searchText": search_query,
     }
-    try:
-        resp = requests.post(WORKDAY_API, json=body, headers=headers, timeout=30)
-        resp.raise_for_status()
-        postings = resp.json().get("jobPostings", [])
-    except (requests.exceptions.RequestException, ValueError) as e:
-        logger.warning("Workday request failed for '%s': %s", search_query, e)
+    postings = None
+    for attempt in range(4):
+        time.sleep(1 + attempt * 4)  # be polite; back off on retries
+        try:
+            resp = requests.post(WORKDAY_API, json=body, headers=headers, timeout=30)
+            if resp.status_code in (429, 500, 502, 503, 504):
+                raise requests.exceptions.HTTPError("HTTP " + str(resp.status_code))
+            resp.raise_for_status()
+            postings = resp.json().get("jobPostings", [])
+            break
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.warning("Workday attempt %d failed for '%s': %s", attempt + 1, search_query, e)
+            last_error = str(e)
+    if postings is None:
+        WORKDAY_FAILURES.append(search_query + ": " + last_error)
         return []
 
     jobs = []

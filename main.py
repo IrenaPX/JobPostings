@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import anthropic
-from src.scraper import scrape_top_jobs, REGION, SEEN_COUNTRIES
+from src.scraper import scrape_top_jobs, REGION, SEEN_COUNTRIES, WORKDAY_FAILURES
 
 REGION_LABEL = {"US": "US", "IN": "India (IDC)"}[REGION]
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() == "true"
@@ -73,6 +73,9 @@ def main():
     logger.info("Scraping Walmart Careers...")
     jobs = scrape_top_jobs()
     logger.info("Found " + str(len(jobs)) + " jobs.")
+
+    for f in WORKDAY_FAILURES:
+        print("::warning::Workday request failed: " + f)
 
     if DRY_RUN:
         for j in jobs:
