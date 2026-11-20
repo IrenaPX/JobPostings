@@ -2,8 +2,9 @@ name: Walmart Jobs Bot India (IDC) -- Weekly Email Draft
 
 on:
   schedule:
-    # Thursday 10:00pm Central (Fri 04:00 UTC; 11:00pm during daylight time)
-    - cron: "0 4 * * 5"
+    # Target Thursday 10pm Central. Set to 9:43pm (03:43 UTC) because GitHub often starts
+    # scheduled runs late, especially at the top of the hour. Shifts +1h during daylight time.
+    - cron: "43 3 * * 5"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -52,4 +53,4 @@ jobs:
       - name: Re-enable this workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow enable "${{ github.workflow }}" -R "${{ github.repository }}"
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/india_jobs.yml/enable"
