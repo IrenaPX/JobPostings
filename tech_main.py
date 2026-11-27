@@ -20,8 +20,7 @@ from src.tech_jobs import COMPANY_STATUS, collect_jobs
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() == "true"
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-5")
 POINTER = (
-    "If you are in a job search, CareerMirror helps with resume and fit questions. "
-    "It is free for 30 days and needs no card: https://careermirror.ai"
+    "Follow this page to get timely updates, and start your journey at https://careermirror.ai"
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s - %(message)s")
