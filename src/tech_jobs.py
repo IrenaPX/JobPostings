@@ -47,7 +47,6 @@ COMPANIES = [
     # Lever boards
     ("Spotify", "lever", "spotify"),
     ("Palantir", "lever", "palantir"),
-    ("Plaid", "lever", "plaid"),
 ]
 
 # Title keywords per category. A job is kept when its title contains one.
